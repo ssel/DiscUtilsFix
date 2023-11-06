@@ -54,6 +54,14 @@ namespace DiscUtils.Ext
             get { return _inode.FileSize; }
         }
 
+        /// <summary>
+        /// Reads from the buffer into a byte array.
+        /// </summary>
+        /// <param name="pos">The offset within the buffer to start reading.</param>
+        /// <param name="buffer">The destination byte array.</param>
+        /// <param name="offset">The start offset within the destination buffer.</param>
+        /// <param name="count">The number of bytes to read.</param>
+        /// <returns>The actual number of bytes read.</returns>
         public override int Read(long pos, byte[] buffer, int offset, int count)
         {
             if (pos >= _inode.FileSize)
@@ -63,8 +71,8 @@ namespace DiscUtils.Ext
 
             long blockSize = _context.SuperBlock.BlockSize;
 
-            int totalRead = 0;
-            int totalBytesRemaining = (int)Math.Min(count, _inode.FileSize - pos);
+            int totalRead = 0;  // number of bytes of the file read so far during this invocation of Read
+            int totalBytesRemaining = (int)Math.Min(count, _inode.FileSize - pos);  // number of bytes remaining to be read from the file during this invocation
 
             ExtentBlock extents = _inode.Extents;
 
@@ -73,7 +81,7 @@ namespace DiscUtils.Ext
                 uint logicalBlock = (uint)((pos + totalRead) / blockSize);  // logical block containing the next byte to read
                 int blockOffset = (int)(pos + totalRead - logicalBlock * blockSize);  // offset within 'logicalBlock' of the next byte to read
 
-                int numRead = 0;
+                int numRead = 0;  // number of bytes read from the file during this iteration of the 'while' loop
 
                 // Find the extent containing 'logicalBlock' or, if none, the first extent beyond it.
                 Extent extent = FindExtent(extents, logicalBlock);
@@ -105,7 +113,8 @@ namespace DiscUtils.Ext
                     numRead = _context.RawStream.Read(buffer, offset + totalRead, toRead);
                 }
 
-                if (numRead == 0)
+                // Assert that we've made some progress during this iteration of the loop.
+                if (numRead <= 0)
                 {
                     throw new IOException($"Unable to read logical block {logicalBlock};  extent?.FirstLogicalBlock: {extent?.FirstLogicalBlock}");
                 }
@@ -137,7 +146,7 @@ namespace DiscUtils.Ext
         /// <summary>
         /// Returns the extent containing a given logical block or, if none, the first extent beyond it.
         /// In other words, returns the first extent containing a logical block greater than or equal to the given one.
-        /// Returns null if no such extent exists.
+        /// Returns null if no such extent exists.  Ignores empty or uninitialized extents.
         /// </summary>
         private Extent FindExtent(ExtentBlock node, uint logicalBlock)
         {
@@ -158,14 +167,15 @@ namespace DiscUtils.Ext
         /// <summary>
         /// Returns the extent containing a given logical block or, if none, the first extent beyond it.
         /// In other words, returns the first extent containing a logical block greater than or equal to the given one.
-        /// Returns null if no such extent exists.
+        /// Returns null if no such extent exists.  Ignores empty or uninitialized extents.
         /// </summary>
         private Extent FindExtent(Extent[] extents, uint logicalBlock)
         {
             for (int i = 0; i < extents.Length; ++i)
             {
                 Extent extent = extents[i];
-                if (extent.FirstLogicalBlock >= logicalBlock ||
+                if (extent.IsInitialized &&
+                    extent.NumBlocks > 0 &&
                     extent.FirstLogicalBlock + extent.NumBlocks > logicalBlock)
                 {
                     return extent;
@@ -178,7 +188,7 @@ namespace DiscUtils.Ext
         /// <summary>
         /// Returns the extent containing a given logical block or, if none, the first extent beyond it.
         /// In other words, returns the first extent containing a logical block greater than or equal to the given one.
-        /// Returns null if no such extent exists.
+        /// Returns null if no such extent exists.  Ignores empty or uninitialized extents.
         /// </summary>
         private Extent FindExtent(ExtentIndex[] indexes, uint logicalBlock)
         {
